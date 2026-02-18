@@ -1,6 +1,7 @@
 import logging
 import sqlite3
 import requests
+import asyncio
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -12,7 +13,7 @@ from telegram.ext import (
 
 # ================= CONFIG =================
 BOT_TOKEN = "8051287885:AAGSq7PC5T_mF2y7xt4hntV4kimhWWpMVuo"
-ADMIN_ID = 8188215655  # apna telegram id
+ADMIN_ID = 8188215655
 
 PUBLIC_CHANNEL = "@TITANXBOTMAKING"
 PRIVATE_CHANNEL_1 = -1003835289143
@@ -71,17 +72,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not existing:
         referred_by = None
+
         if args:
-            ref_id = int(args[0])
-            if ref_id != user.id:
-                cursor.execute("SELECT * FROM users WHERE user_id=?", (ref_id,))
-                ref_user = cursor.fetchone()
-                if ref_user:
-                    referred_by = ref_id
-                    cursor.execute(
-                        "UPDATE users SET points=points+?, referrals=referrals+1 WHERE user_id=?",
-                        (POINTS_PER_REFER, ref_id),
-                    )
+            try:
+                ref_id = int(args[0])
+
+                if ref_id != user.id:
+                    cursor.execute("SELECT * FROM users WHERE user_id=?", (ref_id,))
+                    ref_user = cursor.fetchone()
+
+                    if ref_user:
+                        referred_by = ref_id
+                        cursor.execute(
+                            "UPDATE users SET points=points+?, referrals=referrals+1 WHERE user_id=?",
+                            (POINTS_PER_REFER, ref_id),
+                        )
+            except:
+                pass
 
         cursor.execute(
             "INSERT INTO users (user_id, points, referred_by) VALUES (?, ?, ?)",
@@ -89,15 +96,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         conn.commit()
 
-        await context.bot.send_message(
-            ADMIN_ID,
-            f"🆕 New User:\nID: {user.id}\nName: {user.full_name}"
-        )
+        try:
+            await context.bot.send_message(
+                ADMIN_ID,
+                f"🆕 New User:\nID: {user.id}\nName: {user.full_name}"
+            )
+        except:
+            pass
 
     keyboard = [
         ["💰 Balance", "🔗 Refer"],
         ["👥 My Refers", "📲 Get Num"]
     ]
+
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     await update.message.reply_text(
@@ -115,9 +126,16 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Pehle sab channels join karo.")
         return
 
+    cursor.execute("SELECT points FROM users WHERE user_id=?", (user_id,))
+    data = cursor.fetchone()
+
+    if not data:
+        await update.message.reply_text("Please press /start first.")
+        return
+
+    points = data[0]
+
     if text == "💰 Balance":
-        cursor.execute("SELECT points FROM users WHERE user_id=?", (user_id,))
-        points = cursor.fetchone()[0]
         await update.message.reply_text(f"💰 Your Balance: {points} Points")
 
     elif text == "🔗 Refer":
@@ -130,9 +148,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"👥 Total Refers: {refs}")
 
     elif text == "📲 Get Num":
-        cursor.execute("SELECT points FROM users WHERE user_id=?", (user_id,))
-        points = cursor.fetchone()[0]
-
         if points < GETNUM_COST:
             await update.message.reply_text("❌ Not enough points.")
         else:
@@ -143,9 +158,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if context.user_data.get("awaiting_id"):
             context.user_data["awaiting_id"] = False
 
-            cursor.execute("SELECT points FROM users WHERE user_id=?", (user_id,))
-            points = cursor.fetchone()[0]
-
             if points >= GETNUM_COST:
                 cursor.execute(
                     "UPDATE users SET points=points-? WHERE user_id=?",
@@ -154,9 +166,14 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 conn.commit()
 
                 user_input = text.strip()
-                response = requests.get(API_URL + user_input)
 
-                await update.message.reply_text(f"📲 API Result:\n{response.text}")
+                try:
+                    response = requests.get(API_URL + user_input, timeout=10)
+                    result = response.text
+                except:
+                    result = "API Error ❌"
+
+                await update.message.reply_text(f"📲 API Result:\n{result}")
             else:
                 await update.message.reply_text("❌ Not enough points.")
 
@@ -176,12 +193,18 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     msg = " ".join(context.args)
+
+    if not msg:
+        await update.message.reply_text("Usage: /broadcast message")
+        return
+
     cursor.execute("SELECT user_id FROM users")
     users = cursor.fetchall()
 
     for user in users:
         try:
             await context.bot.send_message(user[0], msg)
+            await asyncio.sleep(0.1)
         except:
             pass
 
@@ -197,6 +220,7 @@ def main():
     app.add_handler(CommandHandler("broadcast", broadcast))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, buttons))
 
+    print("Bot Running...")
     app.run_polling()
 
 
