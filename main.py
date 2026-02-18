@@ -181,35 +181,46 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("📩 Enter Telegram User ID:")
 
     else:
-        if context.user_data.get("awaiting_id"):
-            context.user_data["awaiting_id"] = False
+    else:
+    if context.user_data.get("awaiting_id"):
+        context.user_data["awaiting_id"] = False
 
-            cursor.execute("SELECT points FROM users WHERE user_id=?", (user_id,))
-            points = cursor.fetchone()[0]
+        cursor.execute("SELECT points FROM users WHERE user_id=?", (user_id,))
+        points = cursor.fetchone()[0]
 
-            if points >= GETNUM_COST:
-                cursor.execute(
-                    "UPDATE users SET points=points-? WHERE user_id=?",
-                    (GETNUM_COST, user_id),
-                )
-                conn.commit()
+        if points >= GETNUM_COST:
+            cursor.execute(
+                "UPDATE users SET points=points-? WHERE user_id=?",
+                (GETNUM_COST, user_id),
+            )
+            conn.commit()
 
-                user_input = text.strip()
+            user_input = text.strip()
+
+            try:
                 response = requests.get(API_URL + user_input)
-                data = response.text
+                data = response.json()
 
-                phone_match = re.search(r"(\+?\d{6,15})", data)
+                if data.get("success") and data.get("result"):
+                    result = data["result"]
 
-                if phone_match:
-                    phone = phone_match.group(1)
-                    await update.message.reply_text(
-                        f"📱 Country Code + Phone Number:\n{phone}"
-                    )
+                    country_code = result.get("country_code", "")
+                    number = result.get("number", "")
+
+                    if country_code and number:
+                        await update.message.reply_text(
+                            f"📱 Country Code: {country_code}\n"
+                            f"📞 Phone Number: {number}"
+                        )
+                    else:
+                        await update.message.reply_text("❌ Data not found.")
                 else:
-                    await update.message.reply_text("❌ Phone number not found.")
-            else:
-                await update.message.reply_text("❌ Not enough points.")
+                    await update.message.reply_text("❌ API failed.")
 
+            except Exception as e:
+                await update.message.reply_text("⚠️ API Error.")
+        else:
+            await update.message.reply_text("❌ Not enough points.")
 
 # ================= ADMIN COMMANDS =================
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
