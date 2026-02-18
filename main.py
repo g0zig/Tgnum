@@ -1,23 +1,31 @@
 import logging
 import sqlite3
 import requests
-import asyncio
-from telegram import Update, ReplyKeyboardMarkup
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     ContextTypes,
     filters,
 )
 
 # ================= CONFIG =================
 BOT_TOKEN = "8051287885:AAGSq7PC5T_mF2y7xt4hntV4kimhWWpMVuo"
-ADMIN_ID = 8188215655
+ADMIN_ID = 8188215655  # apna telegram id
 
 PUBLIC_CHANNEL = "@TITANXBOTMAKING"
 PRIVATE_CHANNEL_1 = -1003835289143
 PRIVATE_CHANNEL_2 = -1003838020313
+
+PRIVATE_LINK_1 = "https://t.me/+gAY3EFjVYKg3MGJl"
+PRIVATE_LINK_2 = "https://t.me/+8pOj2QfLFsVjNjU1"
 
 API_URL = "https://api.subhxcosmo.in/api?key=suryanshHacker&type=sms&term="
 
@@ -45,7 +53,8 @@ conn.commit()
 # ================= FORCE JOIN CHECK =================
 async def is_joined(user_id, context):
     try:
-        for channel in [PUBLIC_CHANNEL, PRIVATE_CHANNEL_1, PRIVATE_CHANNEL_2]:
+        channels = [PUBLIC_CHANNEL, PRIVATE_CHANNEL_1, PRIVATE_CHANNEL_2]
+        for channel in channels:
             member = await context.bot.get_chat_member(channel, user_id)
             if member.status in ["left", "kicked"]:
                 return False
@@ -54,17 +63,41 @@ async def is_joined(user_id, context):
         return False
 
 
+async def force_join_message(update, context):
+    keyboard = [
+        [InlineKeyboardButton("📢 Join Public Channel", url=f"https://t.me/{PUBLIC_CHANNEL.replace('@','')}")],
+        [InlineKeyboardButton("🔒 Join Private Channel 1", url=PRIVATE_LINK_1)],
+        [InlineKeyboardButton("🔒 Join Private Channel 2", url=PRIVATE_LINK_2)],
+        [InlineKeyboardButton("✅ Joined", callback_data="check_join")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        "⚠️ Bot access lene ke liye pehle sab channels join karo:",
+        reply_markup=reply_markup
+    )
+
+
+async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+
+    if await is_joined(user_id, context):
+        await query.message.delete()
+        await query.message.reply_text("✅ Verified! Ab /start likho.")
+    else:
+        await query.answer("❌ Abhi sab join nahi kiya!", show_alert=True)
+
+
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
 
     if not await is_joined(user.id, context):
-        await update.message.reply_text(
-            f"⚠️ Pehle sab channels join karo:\n\n"
-            f"{PUBLIC_CHANNEL}\n"
-            f"Private channels ka link admin se lo."
-        )
+        await force_join_message(update, context)
         return
 
     cursor.execute("SELECT * FROM users WHERE user_id=?", (user.id,))
@@ -74,21 +107,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         referred_by = None
 
         if args:
-            try:
-                ref_id = int(args[0])
-
-                if ref_id != user.id:
-                    cursor.execute("SELECT * FROM users WHERE user_id=?", (ref_id,))
-                    ref_user = cursor.fetchone()
-
-                    if ref_user:
-                        referred_by = ref_id
-                        cursor.execute(
-                            "UPDATE users SET points=points+?, referrals=referrals+1 WHERE user_id=?",
-                            (POINTS_PER_REFER, ref_id),
-                        )
-            except:
-                pass
+            ref_id = int(args[0])
+            if ref_id != user.id:
+                cursor.execute("SELECT * FROM users WHERE user_id=?", (ref_id,))
+                ref_user = cursor.fetchone()
+                if ref_user:
+                    referred_by = ref_id
+                    cursor.execute(
+                        "UPDATE users SET points=points+?, referrals=referrals+1 WHERE user_id=?",
+                        (POINTS_PER_REFER, ref_id),
+                    )
 
         cursor.execute(
             "INSERT INTO users (user_id, points, referred_by) VALUES (?, ?, ?)",
@@ -96,19 +124,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         conn.commit()
 
-        try:
-            await context.bot.send_message(
-                ADMIN_ID,
-                f"🆕 New User:\nID: {user.id}\nName: {user.full_name}"
-            )
-        except:
-            pass
+        await context.bot.send_message(
+            ADMIN_ID,
+            f"🆕 New User:\nID: {user.id}\nName: {user.full_name}"
+        )
 
     keyboard = [
         ["💰 Balance", "🔗 Refer"],
         ["👥 My Refers", "📲 Get Num"]
     ]
-
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     await update.message.reply_text(
@@ -123,19 +147,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     if not await is_joined(user_id, context):
-        await update.message.reply_text("⚠️ Pehle sab channels join karo.")
+        await force_join_message(update, context)
         return
-
-    cursor.execute("SELECT points FROM users WHERE user_id=?", (user_id,))
-    data = cursor.fetchone()
-
-    if not data:
-        await update.message.reply_text("Please press /start first.")
-        return
-
-    points = data[0]
 
     if text == "💰 Balance":
+        cursor.execute("SELECT points FROM users WHERE user_id=?", (user_id,))
+        points = cursor.fetchone()[0]
         await update.message.reply_text(f"💰 Your Balance: {points} Points")
 
     elif text == "🔗 Refer":
@@ -148,6 +165,9 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"👥 Total Refers: {refs}")
 
     elif text == "📲 Get Num":
+        cursor.execute("SELECT points FROM users WHERE user_id=?", (user_id,))
+        points = cursor.fetchone()[0]
+
         if points < GETNUM_COST:
             await update.message.reply_text("❌ Not enough points.")
         else:
@@ -158,6 +178,9 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if context.user_data.get("awaiting_id"):
             context.user_data["awaiting_id"] = False
 
+            cursor.execute("SELECT points FROM users WHERE user_id=?", (user_id,))
+            points = cursor.fetchone()[0]
+
             if points >= GETNUM_COST:
                 cursor.execute(
                     "UPDATE users SET points=points-? WHERE user_id=?",
@@ -166,14 +189,9 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 conn.commit()
 
                 user_input = text.strip()
+                response = requests.get(API_URL + user_input)
 
-                try:
-                    response = requests.get(API_URL + user_input, timeout=10)
-                    result = response.text
-                except:
-                    result = "API Error ❌"
-
-                await update.message.reply_text(f"📲 API Result:\n{result}")
+                await update.message.reply_text(f"📲 API Result:\n{response.text}")
             else:
                 await update.message.reply_text("❌ Not enough points.")
 
@@ -194,21 +212,36 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     msg = " ".join(context.args)
 
-    if not msg:
-        await update.message.reply_text("Usage: /broadcast message")
-        return
-
     cursor.execute("SELECT user_id FROM users")
     users = cursor.fetchall()
 
     for user in users:
         try:
             await context.bot.send_message(user[0], msg)
-            await asyncio.sleep(0.1)
         except:
             pass
 
     await update.message.reply_text("✅ Broadcast Sent")
+
+
+async def give(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    try:
+        user_id = int(context.args[0])
+        amount = int(context.args[1])
+
+        cursor.execute(
+            "UPDATE users SET points=points+? WHERE user_id=?",
+            (amount, user_id)
+        )
+        conn.commit()
+
+        await update.message.reply_text("✅ Coins Added Successfully")
+
+    except:
+        await update.message.reply_text("Usage: /give user_id amount")
 
 
 # ================= MAIN =================
@@ -218,9 +251,10 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("broadcast", broadcast))
+    app.add_handler(CommandHandler("give", give))
+    app.add_handler(CallbackQueryHandler(check_join_callback, pattern="check_join"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, buttons))
 
-    print("Bot Running...")
     app.run_polling()
 
 
