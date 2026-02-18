@@ -1,6 +1,7 @@
 import logging
 import sqlite3
 import requests
+import re
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
@@ -18,7 +19,7 @@ from telegram.ext import (
 
 # ================= CONFIG =================
 BOT_TOKEN = "8051287885:AAGSq7PC5T_mF2y7xt4hntV4kimhWWpMVuo"
-ADMIN_ID = 8188215655  # apna telegram id
+ADMIN_ID = 8188215655
 
 PUBLIC_CHANNEL = "@TITANXBOTMAKING"
 PRIVATE_CHANNEL_1 = -1003835289143
@@ -73,7 +74,7 @@ async def force_join_message(update, context):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-        "⚠️ Bot access lene ke liye pehle sab channels join karo:",
+        "⚠️ Bot use karne ke liye pehle sab channels join karo:",
         reply_markup=reply_markup
     )
 
@@ -116,6 +117,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     cursor.execute(
                         "UPDATE users SET points=points+?, referrals=referrals+1 WHERE user_id=?",
                         (POINTS_PER_REFER, ref_id),
+                    )
+
+                    await context.bot.send_message(
+                        ref_id,
+                        f"🎉 New Referral Joined!\n\n💰 {POINTS_PER_REFER} Points Added!"
                     )
 
         cursor.execute(
@@ -190,8 +196,17 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 user_input = text.strip()
                 response = requests.get(API_URL + user_input)
+                data = response.text
 
-                await update.message.reply_text(f"📲 API Result:\n{response.text}")
+                phone_match = re.search(r"(\+?\d{6,15})", data)
+
+                if phone_match:
+                    phone = phone_match.group(1)
+                    await update.message.reply_text(
+                        f"📱 Country Code + Phone Number:\n{phone}"
+                    )
+                else:
+                    await update.message.reply_text("❌ Phone number not found.")
             else:
                 await update.message.reply_text("❌ Not enough points.")
 
@@ -211,7 +226,6 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     msg = " ".join(context.args)
-
     cursor.execute("SELECT user_id FROM users")
     users = cursor.fetchall()
 
@@ -239,6 +253,11 @@ async def give(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
 
         await update.message.reply_text("✅ Coins Added Successfully")
+
+        await context.bot.send_message(
+            user_id,
+            f"💎 Owner ne aapko {amount} Points diye hain!"
+        )
 
     except:
         await update.message.reply_text("Usage: /give user_id amount")
